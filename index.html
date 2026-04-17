@@ -720,7 +720,7 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
     <script>
         // GAS URL
         const GAS_URL = "https://script.google.com/macros/s/AKfycbzvzUBmXqDkOooG0h1vXGapQYhgL1W9a9v2zLvgGRTJZb6fcUVjBLoqdKfBzq1Zf_Dg/exec";
@@ -816,26 +816,55 @@
         // カメラを開始
         async function startCamera() {
             try {
-                videoStream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: 'environment' }
-                });
-                const video = document.getElementById('video');
-                video.srcObject = videoStream;
-                
-                setTimeout(() => {
-                    video.play();
+                Quagga.init({
+                    inputStream: {
+                        name: "Live",
+                        type: "LiveStream",
+                        target: document.querySelector('#video'),
+                        constraints: {
+                            facingMode: "environment",
+                            width: { ideal: 1280 },
+                            height: { ideal: 720 }
+                        }
+                    },
+                    decoder: {
+                        readers: [
+                            "code_128_reader",
+                            "ean_reader",
+                            "ean_8_reader",
+                            "upc_reader",
+                            "upc_e_reader",
+                            "codabar_reader",
+                            "code_39_reader"
+                        ],
+                        debug: {
+                            showCanvas: false,
+                            showPatternName: false,
+                            showConfidence: false,
+                            showCodeName: false
+                        }
+                    }
+                }, function(err) {
+                    if (err) {
+                        console.error(err);
+                        showMessage('カメラの初期化に失敗しました', 'error', 'scanMessage');
+                        return;
+                    }
+                    Quagga.start();
                     scanBarcode();
-                }, 500);
+                });
             } catch (error) {
                 showMessage('カメラへのアクセスが拒否されました', 'error', 'scanMessage');
+                console.error(error);
             }
         }
 
         // カメラを停止
         function stopCamera() {
-            if (videoStream) {
-                videoStream.getTracks().forEach(track => track.stop());
-                videoStream = null;
+            try {
+                Quagga.stop();
+            } catch (e) {
+                console.log("Quagga already stopped");
             }
             if (requestAnimationFrameId) {
                 cancelAnimationFrame(requestAnimationFrameId);
@@ -844,29 +873,17 @@
 
         // バーコードをスキャン
         function scanBarcode() {
-            const video = document.getElementById('video');
-            const canvas = document.createElement('canvas');
-            const context = canvas.getContext('2d');
-
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-
-            if (canvas.width > 0 && canvas.height > 0) {
-                context.drawImage(video, 0, 0, canvas.width, canvas.height);
-                const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-                const code = jsQR(imageData.data, imageData.width, imageData.height);
-
-                if (code) {
-                    const isbn = code.data.trim();
+            Quagga.onDetected(function(result) {
+                const code = result.codeResult.code;
+                if (code && code.length >= 8) {
+                    const isbn = code.trim();
                     document.getElementById('isbnResult').innerText = isbn;
                     document.getElementById('scannedISBN').style.display = 'block';
+                    showMessage(`バーコード検出: ${isbn}`, 'success', 'scanMessage');
                     stopCamera();
                     window.currentISBN = isbn;
-                    return;
                 }
-            }
-
-            requestAnimationFrameId = requestAnimationFrame(scanBarcode);
+            });
         }
 
         // スキャン後に本フォームに進む

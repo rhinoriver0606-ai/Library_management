@@ -720,7 +720,6 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.2.0/dist/html5-qrcode.min.js"></script>
     <script>
         // GAS URL
         const GAS_URL = "https://script.google.com/macros/s/AKfycbzvzUBmXqDkOooG0h1vXGapQYhgL1W9a9v2zLvgGRTJZb6fcUVjBLoqdKfBzq1Zf_Dg/exec";
@@ -729,7 +728,8 @@
         let allBooks = [];
         let filteredBooks = [];
         let currentBook = null;
-        let html5QrcodeScanner = null;
+        let videoStream = null;
+        let isScanningActive = false;
 
         // 初期化
         document.addEventListener('DOMContentLoaded', function() {
@@ -815,62 +815,117 @@
         // カメラを開始
         async function startCamera() {
             try {
-                showMessage('カメラを初期化中...', 'success', 'scanMessage');
-                
-                if (html5QrcodeScanner) {
-                    html5QrcodeScanner.clear();
+                // BarcodeDetector APIが利用可能か確認
+                if ('BarcodeDetector' in window) {
+                    await startBarcodeScan();
+                } else {
+                    showMessage('BarcodeDetector APIがサポートされていません。下記のテキストボックスに手動でISBNを入力してください。', 'error', 'scanMessage');
+                    showManualISBNInput();
                 }
-
-                html5QrcodeScanner = new Html5Qrcode("video");
-                
-                const config = {
-                    fps: 10,
-                    qrbox: { width: 250, height: 250 },
-                    aspectRatio: 1.77778,
-                    useBarCodeDetectorIfAvailable: true
-                };
-
-                await html5QrcodeScanner.start(
-                    { facingMode: "environment" },
-                    config,
-                    (decodedText, decodedResult) => {
-                        if (decodedText && decodedText.length >= 8) {
-                            document.getElementById('isbnResult').innerText = decodedText;
-                            document.getElementById('scannedISBN').style.display = 'block';
-                            showMessage(`バーコード検出: ${decodedText}`, 'success', 'scanMessage');
-                            stopCamera();
-                            window.currentISBN = decodedText;
-                        }
-                    },
-                    (errorMessage) => {
-                        // スキャン失敗時の処理（ここではログに出すだけ）
-                    }
-                );
-                
-                showMessage('カメラが起動しました', 'success', 'scanMessage');
             } catch (error) {
                 console.error('Camera error:', error);
                 showMessage('カメラの起動に失敗しました: ' + error.message, 'error', 'scanMessage');
             }
         }
 
-        // カメラを停止
-        function stopCamera() {
-            if (html5QrcodeScanner) {
-                html5QrcodeScanner.stop().then(() => {
-                    html5QrcodeScanner.clear();
-                    html5QrcodeScanner = null;
-                }).catch(err => {
-                    console.error('Error stopping scanner:', err);
-                    html5QrcodeScanner = null;
+        // BarcodeDetectorを使用したISBNスキャン
+        async function startBarcodeScan() {
+            try {
+                videoStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment' }
                 });
+
+                const video = document.getElementById('video');
+                video.srcObject = videoStream;
+                video.play();
+
+                const barcodeDetector = new BarcodeDetector({
+                    formats: ['ean_13', 'ean_8', 'code_128', 'code_39']
+                });
+
+                showMessage('カメラが起動しました。バーコードをカメラにかざしてください...', 'success', 'scanMessage');
+                isScanningActive = true;
+
+                const scanLoop = async () => {
+                    if (!isScanningActive || !videoStream || !videoStream.active) {
+                        return;
+                    }
+
+                    try {
+                        const barcodes = await barcodeDetector.detect(video);
+
+                        if (barcodes && barcodes.length > 0) {
+                            const barcode = barcodes[0];
+                            const isbn = barcode.rawValue.trim();
+                            if (isbn.length >= 8) {
+                                document.getElementById('isbnResult').innerText = isbn;
+                                document.getElementById('scannedISBN').style.display = 'block';
+                                showMessage(`バーコード検出: ${isbn}`, 'success', 'scanMessage');
+                                isScanningActive = false;
+                                window.currentISBN = isbn;
+                                return;
+                            }
+                        }
+                    } catch (err) {
+                        console.error('Barcode detection error:', err);
+                    }
+
+                    if (isScanningActive) {
+                        requestAnimationFrame(scanLoop);
+                    }
+                };
+
+                scanLoop();
+            } catch (error) {
+                console.error('BarcodeDetector error:', error);
+                showMessage('カメラへのアクセスが拒否されました。手動モードを使用してください。', 'error', 'scanMessage');
+                showManualISBNInput();
             }
         }
 
-        // バーコードをスキャン（html5-qrcodeで自動実行）
+        // 手動ISBN入力フォームを表示
+        function showManualISBNInput() {
+            const html = `
+                <div style="margin-top: 15px; padding: 15px; background-color: #fff3cd; border-radius: 4px; text-align: center;">
+                    <p style="margin-bottom: 10px;">ISBNを手動で入力してください</p>
+                    <input type="text" id="manualISBN" placeholder="ISBNを入力してEnterを押してください" style="width: 100%; padding: 10px; border: 1px solid #ffc107; border-radius: 4px; font-size: 14px;">
+                </div>
+            `;
+            document.getElementById('scanMessage').innerHTML = html;
+            document.getElementById('manualISBN').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    const isbn = this.value.trim();
+                    if (isbn.length >= 8) {
+                        document.getElementById('isbnResult').innerText = isbn;
+                        document.getElementById('scannedISBN').style.display = 'block';
+                        showMessage(`ISBN記録: ${isbn}`, 'success', 'scanMessage');
+                        window.currentISBN = isbn;
+                        isScanningActive = false;
+                    } else {
+                        showMessage('ISBNは8文字以上で、はうでください。', 'error', 'scanMessage');
+                    }
+                }
+            });
+            document.getElementById('manualISBN').focus();
+        }
+
+        // カメラを停止
+        function stopCamera() {
+            isScanningActive = false;
+            if (videoStream) {
+                videoStream.getTracks().forEach(track => track.stop());
+                videoStream = null;
+            }
+            const video = document.getElementById('video');
+            if (video) {
+                video.srcObject = null;
+            }
+        }
+
+        // バーコードをスキャン（BarcodeDetectorで自動実行）
         function scanBarcode() {
-            // html5-qrcodeでは自動的にスキャンが開始されるため、この関数は不要
-            console.log('Scanning started...');
+            // BarcodeDetectorを活用しているため、この関数を指したい点は不要
+            console.log('Scanning with BarcodeDetector API...');
         }
 
         // スキャン後に本フォームに進む

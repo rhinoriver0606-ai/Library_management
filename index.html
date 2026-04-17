@@ -720,7 +720,7 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.2.0/dist/html5-qrcode.min.js"></script>
     <script>
         // GAS URL
         const GAS_URL = "https://script.google.com/macros/s/AKfycbzvzUBmXqDkOooG0h1vXGapQYhgL1W9a9v2zLvgGRTJZb6fcUVjBLoqdKfBzq1Zf_Dg/exec";
@@ -729,8 +729,7 @@
         let allBooks = [];
         let filteredBooks = [];
         let currentBook = null;
-        let videoStream = null;
-        let requestAnimationFrameId = null;
+        let html5QrcodeScanner = null;
 
         // 初期化
         document.addEventListener('DOMContentLoaded', function() {
@@ -816,74 +815,62 @@
         // カメラを開始
         async function startCamera() {
             try {
-                Quagga.init({
-                    inputStream: {
-                        name: "Live",
-                        type: "LiveStream",
-                        target: document.querySelector('#video'),
-                        constraints: {
-                            facingMode: "environment",
-                            width: { ideal: 1280 },
-                            height: { ideal: 720 }
+                showMessage('カメラを初期化中...', 'success', 'scanMessage');
+                
+                if (html5QrcodeScanner) {
+                    html5QrcodeScanner.clear();
+                }
+
+                html5QrcodeScanner = new Html5Qrcode("video");
+                
+                const config = {
+                    fps: 10,
+                    qrbox: { width: 250, height: 250 },
+                    aspectRatio: 1.77778,
+                    useBarCodeDetectorIfAvailable: true
+                };
+
+                await html5QrcodeScanner.start(
+                    { facingMode: "environment" },
+                    config,
+                    (decodedText, decodedResult) => {
+                        if (decodedText && decodedText.length >= 8) {
+                            document.getElementById('isbnResult').innerText = decodedText;
+                            document.getElementById('scannedISBN').style.display = 'block';
+                            showMessage(`バーコード検出: ${decodedText}`, 'success', 'scanMessage');
+                            stopCamera();
+                            window.currentISBN = decodedText;
                         }
                     },
-                    decoder: {
-                        readers: [
-                            "code_128_reader",
-                            "ean_reader",
-                            "ean_8_reader",
-                            "upc_reader",
-                            "upc_e_reader",
-                            "codabar_reader",
-                            "code_39_reader"
-                        ],
-                        debug: {
-                            showCanvas: false,
-                            showPatternName: false,
-                            showConfidence: false,
-                            showCodeName: false
-                        }
+                    (errorMessage) => {
+                        // スキャン失敗時の処理（ここではログに出すだけ）
                     }
-                }, function(err) {
-                    if (err) {
-                        console.error(err);
-                        showMessage('カメラの初期化に失敗しました', 'error', 'scanMessage');
-                        return;
-                    }
-                    Quagga.start();
-                    scanBarcode();
-                });
+                );
+                
+                showMessage('カメラが起動しました', 'success', 'scanMessage');
             } catch (error) {
-                showMessage('カメラへのアクセスが拒否されました', 'error', 'scanMessage');
-                console.error(error);
+                console.error('Camera error:', error);
+                showMessage('カメラの起動に失敗しました: ' + error.message, 'error', 'scanMessage');
             }
         }
 
         // カメラを停止
         function stopCamera() {
-            try {
-                Quagga.stop();
-            } catch (e) {
-                console.log("Quagga already stopped");
-            }
-            if (requestAnimationFrameId) {
-                cancelAnimationFrame(requestAnimationFrameId);
+            if (html5QrcodeScanner) {
+                html5QrcodeScanner.stop().then(() => {
+                    html5QrcodeScanner.clear();
+                    html5QrcodeScanner = null;
+                }).catch(err => {
+                    console.error('Error stopping scanner:', err);
+                    html5QrcodeScanner = null;
+                });
             }
         }
 
-        // バーコードをスキャン
+        // バーコードをスキャン（html5-qrcodeで自動実行）
         function scanBarcode() {
-            Quagga.onDetected(function(result) {
-                const code = result.codeResult.code;
-                if (code && code.length >= 8) {
-                    const isbn = code.trim();
-                    document.getElementById('isbnResult').innerText = isbn;
-                    document.getElementById('scannedISBN').style.display = 'block';
-                    showMessage(`バーコード検出: ${isbn}`, 'success', 'scanMessage');
-                    stopCamera();
-                    window.currentISBN = isbn;
-                }
-            });
+            // html5-qrcodeでは自動的にスキャンが開始されるため、この関数は不要
+            console.log('Scanning started...');
         }
 
         // スキャン後に本フォームに進む
